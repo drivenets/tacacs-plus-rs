@@ -2,14 +2,13 @@
 
 use core::{fmt, num::TryFromIntError};
 
-use bitflags::bitflags;
-use byteorder::{ByteOrder, NetworkEndian};
-use getset::{CopyGetters, Getters};
-use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
-
 pub mod accounting;
 pub mod authentication;
 pub mod authorization;
+
+mod packet;
+pub use packet::header::HeaderInfo;
+pub use packet::{Packet, PacketFlags, PacketType};
 
 mod arguments;
 pub use arguments::{Argument, Arguments, InvalidArgument};
@@ -49,6 +48,7 @@ impl fmt::Display for SerializeError {
     }
 }
 
+#[doc(hidden)]
 impl From<TryFromIntError> for SerializeError {
     fn from(_value: TryFromIntError) -> Self {
         Self::LengthOverflow
@@ -86,11 +86,19 @@ pub enum DeserializeError {
         actual: PacketType,
     },
 
-    /// Text field was not ASCII when it should have been.
+    /// Text field was not printable ASCII when it should have been.
     BadText,
 
-    /// Invalid byte representation of an object.
-    InvalidWireBytes,
+    /// Unencrypted flag was not the expected value.
+    IncorrectUnencryptedFlag,
+
+    /// Buffer containing raw body had incorrect length with respect to length fields in the body.
+    WrongBodyBufferSize {
+        /// The expected buffer length, based on length fields in the packet body.
+        expected: usize,
+        /// The size of the buffer being deserialized, sliced to just the body section.
+        buffer_size: usize,
+    },
 
     /// Object representation was cut off in some way.
     UnexpectedEnd,
@@ -111,11 +119,9 @@ impl fmt::Display for DeserializeError {
             ),
             Self::InvalidArgument(reason) => write!(f, "invalid argument: {reason}"),
             Self::BadText => write!(f, "text field was not printable ASCII"),
-            Self::PacketTypeMismatch { expected, actual } => write!(
-                f,
-                "packet type mismatch: expected {expected:?} but got {actual:?}"
-            ),
-            Self::InvalidWireBytes => write!(f, "invalid byte representation of object"),
+            Self::IncorrectUnencryptedFlag => write!(f, "unencrypted flag had an incorrect value"),
+            Self::PacketTypeMismatch { expected, actual } => write!(f, "packet type mismatch: expected {expected:?} but got {actual:?}"),
+            Self::WrongBodyBufferSize { expected, buffer_size } => write!(f, "body buffer size didn't match length fields: expected {expected} bytes, but buffer was actually {buffer_size}"),
             Self::UnexpectedEnd => write!(f, "unexpected end of buffer when deserializing object"),
         }
     }
@@ -138,6 +144,7 @@ mod error_impls {
 // seals the PacketBody trait
 mod sealed {
     use super::{accounting, authentication, authorization};
+    use super::{Packet, PacketBody};
 
     pub trait Sealed {}
 
@@ -153,6 +160,9 @@ mod sealed {
     // accounting packet bodies
     impl Sealed for accounting::Request<'_> {}
     impl Sealed for accounting::Reply<'_> {}
+
+    // full packet type
+    impl<B: PacketBody> Sealed for Packet<B> {}
 }
 
 /// The major version of the TACACS+ protocol.
@@ -227,118 +237,6 @@ impl From<Version> for u8 {
     }
 }
 
-/// Flags to indicate information about packets or the client/server.
-#[repr(transparent)]
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct PacketFlags(u8);
-
-bitflags! {
-    impl PacketFlags: u8 {
-        /// Indicates the body of the packet is unobfuscated.
-        const UNENCRYPTED       = 0b00000001;
-
-        /// Signals to the server that the client would like to reuse a TCP connection across multiple sessions.
-        const SINGLE_CONNECTION = 0b00000100;
-    }
-}
-
-/// Information included in a TACACS+ packet header.
-#[derive(PartialEq, Eq, Debug, Clone, CopyGetters)]
-pub struct HeaderInfo {
-    #[getset(get_copy = "pub")]
-    /// The protocol major and minor version.
-    version: Version,
-
-    #[getset(get_copy = "pub")]
-    /// The sequence number of the packet. This should be odd for client packets, and even for server packets.
-    sequence_number: u8,
-
-    #[getset(get_copy = "pub")]
-    /// Session/packet flags.
-    flags: PacketFlags,
-
-    #[getset(get_copy = "pub")]
-    /// ID of the current session.
-    session_id: u32,
-}
-
-impl HeaderInfo {
-    /// Size of a full TACACS+ packet header.
-    const HEADER_SIZE_BYTES: usize = 12;
-
-    /// Bundles some information to be put in the header of a TACACS+ packet.
-    pub fn new(version: Version, sequence_number: u8, flags: PacketFlags, session_id: u32) -> Self {
-        Self {
-            version,
-            sequence_number,
-            flags,
-            session_id,
-        }
-    }
-
-    /// Serializes the information stored in a `HeaderInfo` struct, along with the supplemented information to form a complete header.
-    fn serialize(
-        &self,
-        buffer: &mut [u8],
-        packet_type: PacketType,
-        body_length: u32,
-    ) -> Result<usize, SerializeError> {
-        // ensure buffer is large enough to store header
-        if buffer.len() >= Self::HEADER_SIZE_BYTES {
-            buffer[0] = self.version.into();
-            buffer[1] = packet_type as u8;
-            buffer[2] = self.sequence_number;
-            buffer[3] = self.flags.bits();
-
-            // session id is middle 4 bytes of header
-            NetworkEndian::write_u32(&mut buffer[4..8], self.session_id);
-
-            // body length goes at the end of the header (last 4 bytes)
-            NetworkEndian::write_u32(&mut buffer[8..12], body_length);
-
-            Ok(Self::HEADER_SIZE_BYTES)
-        } else {
-            Err(SerializeError::NotEnoughSpace)
-        }
-    }
-}
-
-impl TryFrom<&[u8]> for HeaderInfo {
-    type Error = DeserializeError;
-
-    fn try_from(buffer: &[u8]) -> Result<Self, Self::Error> {
-        let header = Self {
-            version: buffer[0].try_into()?,
-            sequence_number: buffer[2],
-            flags: PacketFlags::from_bits(buffer[3])
-                .ok_or(DeserializeError::InvalidHeaderFlags(buffer[3]))?,
-            session_id: NetworkEndian::read_u32(&buffer[4..8]),
-        };
-
-        Ok(header)
-    }
-}
-
-/// The type of a protocol packet.
-#[repr(u8)]
-#[derive(Debug, PartialEq, Eq, Clone, Copy, TryFromPrimitive)]
-pub enum PacketType {
-    /// Authentication packet.
-    Authentication = 0x1,
-
-    /// Authorization packet.
-    Authorization = 0x2,
-
-    /// Accounting packet.
-    Accounting = 0x3,
-}
-
-impl From<TryFromPrimitiveError<PacketType>> for DeserializeError {
-    fn from(value: TryFromPrimitiveError<PacketType>) -> Self {
-        Self::InvalidPacketType(value.number)
-    }
-}
-
 /// A type that can be treated as a TACACS+ protocol packet body.
 ///
 /// This trait is sealed per the [Rust API guidelines], so it cannot be implemented by external types.
@@ -359,104 +257,14 @@ pub trait PacketBody: sealed::Sealed {
     }
 }
 
+// TODO: merge with PacketBody? would have to implement serialization of Reply packets though
+// Might also be a good idea to bring deserialization in as well (to make it more explicit than TryFrom/TryInto)
 /// Something that can be serialized into a binary format.
-pub trait Serialize {
+#[doc(hidden)]
+trait Serialize: sealed::Sealed {
     /// Returns the current size of the packet as represented on the wire.
     fn wire_size(&self) -> usize;
 
     /// Serializes data into a buffer, returning the resulting length on success.
     fn serialize_into_buffer(&self, buffer: &mut [u8]) -> Result<usize, SerializeError>;
-}
-
-/// A full TACACS+ protocol packet.
-#[derive(Getters, PartialEq, Eq, Debug)]
-pub struct Packet<B: PacketBody> {
-    /// Gets some of the header information associated with a packet.
-    #[getset(get = "pub")]
-    header: HeaderInfo,
-
-    /// Gets the body of the packet.
-    #[getset(get = "pub")]
-    body: B,
-}
-
-impl<B: PacketBody> Packet<B> {
-    /// Location of the start of the packet body, after the header.
-    const BODY_START: usize = 12;
-
-    /// Assembles a header and body into a full packet.
-    ///
-    /// NOTE: The version stored in the header may be updated depending on the body,
-    /// as authentication start packets in particular may require a specific protocol
-    /// minor version. Prefer using [`Packet::header()`] and reading the version from
-    /// there rather than the `HeaderInfo` passed as an argument.
-    pub fn new(mut header: HeaderInfo, body: B) -> Self {
-        // update minor version to what is required by the body, if applicable
-        if let Some(minor) = body.required_minor_version() {
-            header.version.1 = minor;
-        }
-
-        Self { header, body }
-    }
-}
-
-impl<B: PacketBody + Serialize> Serialize for Packet<B> {
-    fn wire_size(&self) -> usize {
-        HeaderInfo::HEADER_SIZE_BYTES + self.body.wire_size()
-    }
-
-    fn serialize_into_buffer(&self, buffer: &mut [u8]) -> Result<usize, SerializeError> {
-        if buffer.len() >= self.wire_size() {
-            // serialize body first to get its length, which is stored in the header
-            let body_length = self
-                .body
-                .serialize_into_buffer(&mut buffer[HeaderInfo::HEADER_SIZE_BYTES..])?;
-
-            // fill in header information
-            let header_bytes = self.header.serialize(
-                &mut buffer[..HeaderInfo::HEADER_SIZE_BYTES],
-                B::TYPE,
-                body_length.try_into()?,
-            )?;
-
-            // return total length written
-            Ok(header_bytes + body_length)
-        } else {
-            Err(SerializeError::NotEnoughSpace)
-        }
-    }
-}
-
-impl<'raw, B: PacketBody + TryFrom<&'raw [u8], Error = DeserializeError>> TryFrom<&'raw [u8]>
-    for Packet<B>
-{
-    type Error = DeserializeError;
-
-    fn try_from(buffer: &'raw [u8]) -> Result<Self, Self::Error> {
-        if buffer.len() > HeaderInfo::HEADER_SIZE_BYTES {
-            let header: HeaderInfo = buffer[..HeaderInfo::HEADER_SIZE_BYTES].try_into()?;
-
-            let actual_packet_type = PacketType::try_from(buffer[1])?;
-            if actual_packet_type == B::TYPE {
-                // body length is stored at the end of the 12-byte header
-                let body_length = NetworkEndian::read_u32(&buffer[8..12]) as usize;
-
-                // ensure buffer actually contains whole body
-                if buffer[Self::BODY_START..].len() >= body_length {
-                    let body =
-                        buffer[Self::BODY_START..Self::BODY_START + body_length].try_into()?;
-                    Ok(Self::new(header, body))
-                } else {
-                    Err(DeserializeError::UnexpectedEnd)
-                }
-            } else {
-                Err(DeserializeError::PacketTypeMismatch {
-                    expected: B::TYPE,
-                    actual: actual_packet_type,
-                })
-            }
-        } else {
-            Err(DeserializeError::UnexpectedEnd)
-        }
-    }
 }

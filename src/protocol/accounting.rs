@@ -261,23 +261,29 @@ impl PacketBody for Reply<'_> {
     const REQUIRED_FIELDS_LENGTH: usize = Status::WIRE_SIZE + 4;
 }
 
+// hide in docs, since this isn't meant to be used externally
+#[doc(hidden)]
 impl<'raw> TryFrom<&'raw [u8]> for Reply<'raw> {
     type Error = DeserializeError;
 
     fn try_from(buffer: &'raw [u8]) -> Result<Self, Self::Error> {
         let extracted_lengths = Self::extract_field_lengths(buffer)?;
 
-        // NOTE: the length returned by claimed_length() if non-Err is guaranteed to be at least REQUIRED_FIELDS_LENGTH (5) so we can assume that here without explicitly checking it
-        if buffer.len() >= extracted_lengths.total_length as usize {
+        // the provided buffer is sliced to the length reported in the packet header in Packet::deserialize_body(),
+        // so we can compare against it this way
+        let length_from_header = buffer.len();
+
+        // ensure buffer length & calculated length from body fields match
+        if extracted_lengths.total_length as usize == length_from_header {
+            // SAFETY: extract_field_lengths() performs a check against REQUIRED_FIELDS_LENGTH (5), so this will not panic
             let status = Status::try_from(buffer[4])?;
 
-            // server message starts
             let data_offset =
                 Self::SERVER_MESSAGE_OFFSET + extracted_lengths.server_message_length as usize;
 
             let server_message =
                 FieldText::try_from(&buffer[Self::SERVER_MESSAGE_OFFSET..data_offset])
-                    .map_err(|_| DeserializeError::InvalidWireBytes)?;
+                    .map_err(|_| DeserializeError::BadText)?;
             let data = &buffer[data_offset..data_offset + extracted_lengths.data_length as usize];
 
             Ok(Self {
@@ -286,7 +292,10 @@ impl<'raw> TryFrom<&'raw [u8]> for Reply<'raw> {
                 data,
             })
         } else {
-            Err(DeserializeError::UnexpectedEnd)
+            Err(DeserializeError::WrongBodyBufferSize {
+                expected: extracted_lengths.total_length as usize,
+                buffer_size: length_from_header,
+            })
         }
     }
 }

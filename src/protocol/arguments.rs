@@ -1,18 +1,27 @@
 use core::fmt;
 use core::iter::zip;
 
-use crate::FieldText;
+use getset::CopyGetters;
 
 use super::{DeserializeError, SerializeError};
+use crate::FieldText;
 
 #[cfg(test)]
 mod tests;
 
 /// An argument in the TACACS+ protocol, which exists for extensibility.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, CopyGetters)]
 pub struct Argument<'data> {
+    /// Gets the name of the argument.
+    #[getset(get_copy = "pub")]
     name: FieldText<'data>,
+
+    /// Gets the value of the argument.
+    #[getset(get_copy = "pub")]
     value: FieldText<'data>,
+
+    /// Whether this argument is required to be processed or not.
+    #[getset(get_copy = "pub")]
     required: bool,
 }
 
@@ -47,7 +56,7 @@ impl fmt::Display for InvalidArgument {
             ),
             Self::NoDelimiter => write!(f, "encoded argument value had no delimiter"),
             Self::TooLong => write!(f, "the total length of an argument (name + length + delimiter) must not exceed u8::MAX, for encoding reasons"),
-            Self::BadText => write!(f, "encoded argument value was not valid ASCII")
+            Self::BadText => write!(f, "encoded argument value was not printable ASCII")
         }
     }
 }
@@ -71,7 +80,7 @@ impl<'data> Argument<'data> {
         value: FieldText<'data>,
         required: bool,
     ) -> Result<Self, InvalidArgument> {
-        // NOTE: since both name/value are AsciiStrs, we don't have to check if they are ascii as in `check_encoding`
+        // NOTE: since both name/value are `FieldText`s, we don't have to check if they are ascii as in `check_encoding`
 
         if name.is_empty() {
             // name must be nonempty (?)
