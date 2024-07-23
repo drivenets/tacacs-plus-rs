@@ -57,7 +57,7 @@ impl From<TryFromPrimitiveError<PacketType>> for DeserializeError {
 
 /// A full TACACS+ protocol packet.
 #[derive(Getters, Debug, PartialEq, Eq)]
-pub struct Packet<B: PacketBody> {
+pub struct Packet<B> {
     /// Gets some of the header information associated with a packet.
     #[getset(get = "pub")]
     header: HeaderInfo,
@@ -275,6 +275,21 @@ impl<'raw, B: PacketBody + TryFrom<&'raw [u8], Error = DeserializeError>> Packet
             }
         } else {
             Err(DeserializeError::UnexpectedEnd)
+        }
+    }
+}
+
+// TODO: stop ignoring dead_code once client is implemented
+// private_bounds lint is ignored here since this impl block doesn't contain any public functions
+#[cfg(feature = "std")]
+#[allow(private_bounds)]
+#[allow(dead_code)]
+impl<B: super::ToOwnedBody> Packet<B> {
+    /// Converts this packet into one that owns its body's fields.
+    pub(crate) fn to_owned(&self) -> Packet<B::Owned> {
+        Packet {
+            header: self.header.clone(),
+            body: self.body.to_owned(),
         }
     }
 }
