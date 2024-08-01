@@ -1,3 +1,3 @@
 [workspace]
-members = ["tacacs-plus-protocol"]
+members = ["tacacs-plus-protocol", "tacacs-plus"]
 resolver = "2"

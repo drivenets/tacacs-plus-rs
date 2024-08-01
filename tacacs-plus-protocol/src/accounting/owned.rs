@@ -2,31 +2,31 @@ use std::borrow::ToOwned;
 use std::string::String;
 
 use super::{Reply, Status};
-use crate::ToOwnedBody;
+use crate::owned::FromBorrowedBody;
+use crate::sealed::Sealed;
 
 /// An owned version of a [`Reply`](super::Reply).
-// TODO: stop ignoring dead_code lint when fields are actually used in client
-#[allow(dead_code)]
-pub(crate) struct ReplyOwned {
+pub struct ReplyOwned {
     /// The status returned by the server.
-    pub(crate) status: Status,
+    pub status: Status,
 
-    // TODO: string or separate FieldTextOwned (?) type?
     /// The message to display to the user.
-    pub(crate) server_message: String,
+    pub server_message: String,
 
     /// The console/administrative message from the server.
-    pub(crate) data: String,
+    pub data: String,
 }
 
-impl ToOwnedBody for Reply<'_> {
-    type Owned = ReplyOwned;
+impl Sealed for ReplyOwned {}
 
-    fn to_owned(&self) -> Self::Owned {
+impl FromBorrowedBody for ReplyOwned {
+    type Borrowed<'b> = Reply<'b>;
+
+    fn from_borrowed(borrowed: &Self::Borrowed<'_>) -> Self {
         ReplyOwned {
-            status: self.status,
-            server_message: self.server_message.as_ref().to_owned(),
-            data: self.data.as_ref().to_owned(),
+            status: borrowed.status,
+            server_message: borrowed.server_message.as_ref().to_owned(),
+            data: borrowed.data.as_ref().to_owned(),
         }
     }
 }

@@ -1,3 +1,5 @@
+use getset::CopyGetters;
+
 use crate::FieldText;
 use crate::MinorVersion;
 
@@ -51,7 +53,7 @@ impl AuthenticationMethod {
 
 /// A privilege level for authentication. Limited to the range 0-15, inclusive.
 #[repr(transparent)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct PrivilegeLevel(u8);
 
 impl PrivilegeLevel {
@@ -76,9 +78,16 @@ impl PrivilegeLevel {
     }
 }
 
+impl Default for PrivilegeLevel {
+    /// Returns the lowest privilege level of 0.
+    fn default() -> Self {
+        Self(0)
+    }
+}
+
 /// Types of authentication supported by the TACACS+ protocol.
 ///
-/// RFC-8907 partitions these by supported minor version: [`Ascii`](AuthenticationType::Ascii) requires [`MinorVersion::Default`](crate::protocol::MinorVersion::Default), while the rest (beside [`NotSet`](AuthenticationType::NotSet), I believe) require [`MinorVersion::V1`](crate::protocol::MinorVersion::V1).
+/// RFC-8907 partitions these by supported minor version: [`Ascii`](AuthenticationType::Ascii) requires [`MinorVersion::Default`](crate::MinorVersion::Default), while the rest (beside [`NotSet`](AuthenticationType::NotSet), I believe) require [`MinorVersion::V1`](crate::MinorVersion::V1).
 ///
 /// *Note:* TACACS+ as a protocol does not meet modern standards of security; access to the data lines must be protected. See [RFC-8907 Section 10.1]
 ///
@@ -178,10 +187,18 @@ impl AuthenticationContext {
 }
 
 /// Some information about the user connected to a TACACS+ client.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, CopyGetters)]
 pub struct UserInformation<'info> {
+    /// The user performing the action that is connected to the client.
+    #[getset(get_copy = "pub")]
     user: &'info str,
+
+    /// The port the user is connected to.
+    #[getset(get_copy = "pub")]
     port: FieldText<'info>,
+
+    /// The remote address that the user is connecting from.
+    #[getset(get_copy = "pub")]
     remote_address: FieldText<'info>,
 }
 

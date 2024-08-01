@@ -33,6 +33,9 @@ pub use fields::*;
 mod text;
 pub use text::FieldText;
 
+#[cfg(feature = "std")]
+mod owned;
+
 /// An error that occurred when serializing a packet or any of its components into their binary format.
 #[non_exhaustive]
 #[derive(Debug, PartialEq, Eq)]
@@ -274,11 +277,9 @@ pub trait PacketBody: sealed::Sealed {
     }
 }
 
-// TODO: merge with PacketBody? would have to implement serialization of Reply packets though
-// Might also be a good idea to bring deserialization in as well (to make it more explicit than TryFrom/TryInto)
 /// Something that can be serialized into a binary format.
 #[doc(hidden)]
-trait Serialize: sealed::Sealed {
+pub trait Serialize: sealed::Sealed {
     /// Returns the current size of the packet as represented on the wire.
     fn wire_size(&self) -> usize;
 
@@ -286,15 +287,9 @@ trait Serialize: sealed::Sealed {
     fn serialize_into_buffer(&self, buffer: &mut [u8]) -> Result<usize, SerializeError>;
 }
 
-/// Converts a reference-based packet to a packet that owns its fields.
-///
-/// A [`Borrow`](std::borrow::Borrow) impl for the different packet types would be nontrivial, if even possible,
-/// which is why the [`ToOwned`](std::borrow::ToOwned) trait isn't used.
-#[cfg(feature = "std")]
-pub(crate) trait ToOwnedBody: PacketBody {
-    /// The resulting owned packet type.
-    type Owned;
-
-    /// Converts the packet type with references to its data to one that owns its field data.
-    fn to_owned(&self) -> Self::Owned;
+/// Something that can be deserialized from a binary format.
+#[doc(hidden)]
+pub trait Deserialize<'raw>: sealed::Sealed + Sized {
+    /// Attempts to deserialize an object from a buffer.
+    fn deserialize_from_buffer(buffer: &'raw [u8]) -> Result<Self, DeserializeError>;
 }
