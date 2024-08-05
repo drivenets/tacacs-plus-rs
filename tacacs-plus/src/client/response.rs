@@ -1,7 +1,5 @@
-use tacacs_plus_protocol::authentication;
-
-#[doc(hidden)]
-pub struct BadStatus(pub(super) authentication::Status);
+use tacacs_plus_protocol::ArgumentOwned;
+use tacacs_plus_protocol::{authentication, authorization};
 
 /// The final status returned by a server during a TACACS+ session.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -12,9 +10,43 @@ pub enum ResponseStatus {
     Failure,
 }
 
+/// A server response from an authentication session.
+#[must_use = "Authentication failure is not reported as an error, so the status field must be checked."]
+#[derive(PartialEq, Eq, Debug)]
+pub struct AuthenticationResponse {
+    /// Whether the authentication attempt passed or failed.
+    pub status: ResponseStatus,
+
+    /// The message returned by the server, intended to be displayed to the user.
+    pub user_message: String,
+
+    /// Extra data returned by the server.
+    pub data: Vec<u8>,
+}
+
+/// A TACACS+ server response from an authorization session.
+#[must_use = "The status of the response should be checked, since a failure is not reported as an error."]
+#[derive(PartialEq, Eq, Debug)]
+pub struct AuthorizationResponse {
+    /// Whether the authorization attempt succeeded.
+    pub status: ResponseStatus,
+
+    /// The arguments returned from the server, if any.
+    pub arguments: Vec<ArgumentOwned>,
+
+    /// A message that may be presented to a user connected to this client. (`server_msg` from RFC8907)
+    pub user_message: String,
+
+    /// Administrative console message from the server. (`data` from RFC8907)
+    pub admin_message: String,
+}
+
+#[doc(hidden)]
+pub struct BadAuthenticationStatus(pub(super) authentication::Status);
+
 #[doc(hidden)]
 impl TryFrom<authentication::Status> for ResponseStatus {
-    type Error = BadStatus;
+    type Error = BadAuthenticationStatus;
 
     fn try_from(value: authentication::Status) -> Result<Self, Self::Error> {
         match value {
@@ -30,21 +62,32 @@ impl TryFrom<authentication::Status> for ResponseStatus {
             // (see section 5.4.3 of RFC 8907: https://www.rfc-editor.org/rfc/rfc8907.html#section-5.4.3-6)
             authentication::Status::Restart => Ok(ResponseStatus::Failure),
 
-            bad_status => Err(BadStatus(bad_status)),
+            bad_status => Err(BadAuthenticationStatus(bad_status)),
         }
     }
 }
 
-/// A server response from an authentication session.
-#[must_use = "Authentication failure is not reported as an error, so the status field must be checked."]
-#[derive(PartialEq, Eq, Debug)]
-pub struct AuthenticationResponse {
-    /// Whether the authentication attempt passed or failed.
-    pub status: ResponseStatus,
+#[doc(hidden)]
+pub struct BadAuthorizationStatus(pub(super) authorization::Status);
 
-    /// The message returned by the server, intended to be displayed to the user.
-    pub message: String,
+#[doc(hidden)]
+impl TryFrom<authorization::Status> for ResponseStatus {
+    type Error = BadAuthorizationStatus;
 
-    /// Extra data returned by the server.
-    pub data: Vec<u8>,
+    fn try_from(value: authorization::Status) -> Result<Self, Self::Error> {
+        match value {
+            authorization::Status::PassAdd | authorization::Status::PassReplace => {
+                Ok(ResponseStatus::Success)
+            }
+
+            authorization::Status::Fail => Ok(ResponseStatus::Failure),
+
+            // treat follow status as failure like in authentication
+            // this might not be required by the RFC but is done for consistency
+            #[allow(deprecated)]
+            authorization::Status::Follow => Ok(ResponseStatus::Failure),
+
+            bad_status => Err(BadAuthorizationStatus(bad_status)),
+        }
+    }
 }
