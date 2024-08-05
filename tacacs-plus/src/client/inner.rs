@@ -8,7 +8,10 @@ use futures::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tacacs_plus_protocol::{HeaderInfo, PacketFlags};
 
 /// A (pinned, boxed) future that returns a client connection or an error, as returned from a [`ConnectionFactory`].
-pub type ConnectionFuture<S> = Pin<Box<dyn Future<Output = io::Result<S>>>>;
+///
+/// This is roughly equivalent to the [`BoxFuture`](futures::future::BoxFuture) type in the `futures` crate, but without
+/// the lifetime parameter.
+pub type ConnectionFuture<S> = Pin<Box<dyn Future<Output = io::Result<S>> + Send>>;
 
 /// An async factory that returns connections used by a [`Client`](super::Client).
 ///
@@ -36,20 +39,18 @@ pub type ConnectionFuture<S> = Pin<Box<dyn Future<Output = io::Result<S>>>>;
 ///     })
 /// }
 ///
-/// fn typechecks() {
-///     // boxed function pointer
-///     let _: ConnectionFactory<_> = Box::new(function_factory);
+/// // boxed function pointer
+/// let _: ConnectionFactory<_> = Box::new(function_factory);
 ///
-///     // closures work too
-///     let _: ConnectionFactory<_> = Box::new(
-///         || Box::pin(
-///             async {
-///                 let vec: Vec<u8> = Vec::new();
-///                 Ok(Cursor::new(vec))
-///             }
-///         )
-///     );
-/// }
+/// // closures work too
+/// let _: ConnectionFactory<_> = Box::new(
+///     || Box::pin(
+///         async {
+///             let vec: Vec<u8> = Vec::new();
+///             Ok(Cursor::new(vec))
+///         }
+///     )
+/// );
 /// ```
 pub type ConnectionFactory<S> = Box<dyn Fn() -> ConnectionFuture<S> + Send>;
 
