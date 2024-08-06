@@ -10,10 +10,10 @@ use rand::Rng;
 
 use response::AuthorizationResponse;
 use tacacs_plus_protocol as protocol;
+use tacacs_plus_protocol::Arguments;
 use tacacs_plus_protocol::Serialize;
 use tacacs_plus_protocol::{authentication, authorization};
-use tacacs_plus_protocol::{ArgumentOwned, Arguments};
-use tacacs_plus_protocol::{AuthenticationContext, AuthenticationMethod, AuthenticationService};
+use tacacs_plus_protocol::{AuthenticationContext, AuthenticationService};
 use tacacs_plus_protocol::{HeaderInfo, MajorVersion, MinorVersion, Version};
 use tacacs_plus_protocol::{Packet, PacketBody, PacketFlags};
 
@@ -28,6 +28,9 @@ pub use context::{ContextBuilder, SessionContext};
 
 mod error;
 pub use error::ClientError;
+
+// reexported for ease of access
+pub use tacacs_plus_protocol::{ArgumentOwned, AuthenticationMethod};
 
 /// A TACACS+ client.
 #[derive(Clone)]
@@ -314,8 +317,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Client<S> {
             // use default minor version, since there's no reason to use v1 outside of authentication
             self.make_header(1, MinorVersion::Default),
             authorization::Request::new(
-                // TODO: allow consumer to specify auth method? we're probably not going to support any other methods though
-                AuthenticationMethod::TacacsPlus,
+                context.authentication_method(),
                 AuthenticationContext {
                     privilege_level: context.privilege_level,
                     authentication_type: protocol::AuthenticationType::NotSet,
