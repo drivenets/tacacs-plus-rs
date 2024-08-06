@@ -55,4 +55,25 @@ jobs:
         if: ${{ matrix.features == 'std' }}
         run: |
           cargo build --package tacacs-plus --verbose
-          cargo test --package tacacs-plus --verbose
+          # only test lib/doc tests; integration tests need a dedicated server
+          cargo test --package tacacs-plus --lib --verbose
+          cargo test --package tacacs-plus --doc --verbose
+      - name: Setup Docker Buildx builder
+        if: ${{ matrix.features == 'std' }}
+        uses: docker/setup-buildx-action@v3
+        with:
+          use: true
+          install: true
+      - name: Build test server image
+        if: ${{ matrix.features == 'std' }}
+        uses: docker/build-push-action@v6
+        with:
+          cache-from: type=gha,mode=max
+          cache-to: type=gha,mode=max
+          load: true
+          context: ./test-assets/
+          file: ./test-assets/Dockerfile.test_server
+          tags: localhost/tacacs-test-server
+      - name: Run client tests against server
+        if: ${{ matrix.features == 'std' }}
+        run: ./test-assets/run-client-tests.sh
