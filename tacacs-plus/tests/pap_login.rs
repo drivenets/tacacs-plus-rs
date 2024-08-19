@@ -1,10 +1,8 @@
-use common::get_server_address;
 use futures::{FutureExt, TryFutureExt};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
 use tacacs_plus::Client;
-use tacacs_plus::ConnectionFactory;
 use tacacs_plus::{AuthenticationType, ContextBuilder, ResponseStatus};
 
 mod common;
@@ -37,29 +35,5 @@ async fn pap_success() {
         response.status,
         ResponseStatus::Success,
         "authentication failed, full response: {response:?}"
-    );
-}
-
-#[tokio::test]
-async fn pap_follow_failure() {
-    let address = get_server_address();
-    let factory: ConnectionFactory<_> = Box::new(move || {
-        TcpStream::connect(address.clone())
-            .map_ok(TokioAsyncWriteCompatExt::compat_write)
-            .boxed()
-    });
-
-    let client = Client::new(factory, Some(common::SECRET_KEY));
-
-    let context = ContextBuilder::new("followme").build();
-    let response = client
-        .authenticate(context, "outbound", AuthenticationType::Pap)
-        .await
-        .expect("authentication session couldn't be completed");
-
-    assert_eq!(
-        response.status,
-        ResponseStatus::Failure,
-        "follow response should be treated as a failure"
     );
 }

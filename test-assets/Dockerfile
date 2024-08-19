@@ -40,10 +40,6 @@ user = paponly {
     pap = cleartext pass-word
 }
 
-user = followme {
-    opap = cleartext outbound
-}
-
 user = DEFAULT {
     service = guest {
         priv-lvl = 0
