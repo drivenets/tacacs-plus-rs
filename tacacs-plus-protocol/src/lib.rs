@@ -13,11 +13,14 @@ extern crate std;
 
 use core::{fmt, num::TryFromIntError};
 
+mod util;
+
 pub mod accounting;
 pub mod authentication;
 pub mod authorization;
 
 mod packet;
+use getset::CopyGetters;
 pub use packet::header::HeaderInfo;
 pub use packet::{Packet, PacketFlags, PacketType};
 
@@ -157,6 +160,7 @@ mod error_impls {
     impl Error for SerializeError {}
     impl Error for InvalidArgument {}
     impl Error for super::authentication::BadStart {}
+    impl Error for super::authentication::DataTooLong {}
     impl<T> Error for InvalidText<T> where InvalidText<T>: fmt::Debug + fmt::Display {}
 }
 
@@ -188,16 +192,28 @@ mod sealed {
 /// The major version of the TACACS+ protocol.
 #[repr(u8)]
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MajorVersion {
     /// The only current major version specified in RFC8907.
     RFC8907 = 0xc,
 }
 
+impl fmt::Display for MajorVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                MajorVersion::RFC8907 => "RFC 8907",
+            }
+        )
+    }
+}
+
 /// The minor version of the TACACS+ protocol in use, which specifies choices for authentication methods.
 #[repr(u8)]
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MinorVersion {
     /// Default minor version, used for ASCII authentication.
     Default = 0x0,
@@ -205,30 +221,64 @@ pub enum MinorVersion {
     V1 = 0x1,
 }
 
+impl fmt::Display for MinorVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Default => "default",
+                Self::V1 => "1",
+            }
+        )
+    }
+}
+
 /// The full protocol version.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct Version(MajorVersion, MinorVersion);
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, CopyGetters)]
+#[getset(get_copy = "pub")]
+pub struct Version {
+    /// The major TACACS+ version.
+    major: MajorVersion,
+
+    /// The minor TACACS+ version.
+    minor: MinorVersion,
+}
 
 impl Version {
     /// Bundles together a TACACS+ protocol major and minor version.
     pub fn new(major: MajorVersion, minor: MinorVersion) -> Self {
-        Self(major, minor)
-    }
-
-    /// Gets the major TACACS+ version.
-    pub fn major(&self) -> MajorVersion {
-        self.0
-    }
-
-    /// Gets the minor TACACS+ version.
-    pub fn minor(&self) -> MinorVersion {
-        self.1
+        Self { major, minor }
     }
 }
 
 impl Default for Version {
     fn default() -> Self {
-        Self(MajorVersion::RFC8907, MinorVersion::Default)
+        Self {
+            major: MajorVersion::RFC8907,
+            minor: MinorVersion::Default,
+        }
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "major {}, minor {}", self.major(), self.minor())
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        // compare major versions, then tiebreak with minor versions
+        self.major
+            .cmp(&other.major)
+            .then(self.minor.cmp(&other.minor))
     }
 }
 
@@ -244,7 +294,10 @@ impl TryFrom<u8> for Version {
                 _ => Err(DeserializeError::InvalidVersion(value)),
             }?;
 
-            Ok(Self(MajorVersion::RFC8907, minor_version))
+            Ok(Self {
+                major: MajorVersion::RFC8907,
+                minor: minor_version,
+            })
         } else {
             Err(DeserializeError::InvalidVersion(value))
         }
@@ -253,7 +306,7 @@ impl TryFrom<u8> for Version {
 
 impl From<Version> for u8 {
     fn from(value: Version) -> Self {
-        ((value.0 as u8) << 4) | (value.1 as u8 & 0xf)
+        ((value.major as u8) << 4) | (value.minor as u8 & 0xf)
     }
 }
 

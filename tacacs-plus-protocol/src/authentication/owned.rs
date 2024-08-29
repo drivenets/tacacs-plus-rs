@@ -1,5 +1,6 @@
 use std::borrow::ToOwned;
 use std::string::String;
+use std::string::ToString;
 use std::vec::Vec;
 
 use super::Reply;
@@ -8,6 +9,7 @@ use crate::owned::FromBorrowedBody;
 use crate::sealed::Sealed;
 
 /// An authentication reply packet with owned fields.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ReplyOwned {
     /// The status, as returned by the server.
     pub status: Status,
@@ -31,7 +33,7 @@ impl FromBorrowedBody for ReplyOwned {
         ReplyOwned {
             status: borrowed.status,
             flags: borrowed.flags,
-            server_message: borrowed.server_message.as_ref().to_owned(),
+            server_message: borrowed.server_message.to_string(),
             data: borrowed.data.to_owned(),
         }
     }

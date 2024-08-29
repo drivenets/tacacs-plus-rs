@@ -10,20 +10,27 @@ use crate::FieldText;
 mod tests;
 
 /// An argument in the TACACS+ protocol, which exists for extensibility.
-#[derive(Clone, Default, PartialEq, Eq, Debug, Getters, CopyGetters, Setters)]
+#[derive(Clone, Default, PartialEq, Eq, Debug, Hash, Getters, CopyGetters, Setters)]
 #[getset(set = "pub")]
 pub struct Argument<'data> {
     /// The name of the argument.
     #[getset(get = "pub")]
     name: FieldText<'data>,
 
-    /// Ts the value of the argument.
+    /// The value of the argument.
     #[getset(get = "pub")]
     value: FieldText<'data>,
 
     /// Whether processing this argument is mandatory.
     #[getset(get_copy = "pub")]
     mandatory: bool,
+}
+
+impl fmt::Display for Argument<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // just write as encoded form (name + delimiter + value)
+        write!(f, "{}{}{}", self.name, self.delimiter(), self.value)
+    }
 }
 
 /// Error to determine
@@ -134,11 +141,7 @@ impl<'data> Argument<'data> {
             buffer[..delimiter_index].copy_from_slice(self.name.as_bytes());
 
             // choose delimiter based on whether argument is required
-            buffer[delimiter_index] = if self.mandatory {
-                Self::MANDATORY_DELIMITER
-            } else {
-                Self::OPTIONAL_DELIMITER
-            } as u8;
+            buffer[delimiter_index] = self.delimiter() as u8;
 
             // value goes just after delimiter
             buffer[delimiter_index + 1..encoded_len].copy_from_slice(self.value.as_bytes());
@@ -146,6 +149,16 @@ impl<'data> Argument<'data> {
             Ok(encoded_len)
         } else {
             Err(SerializeError::NotEnoughSpace)
+        }
+    }
+
+    /// Returns the delimiter that will be used for this argument when it's encoded on the wire,
+    /// based on whether it's mandatory or not.
+    fn delimiter(&self) -> char {
+        if self.mandatory {
+            Self::MANDATORY_DELIMITER
+        } else {
+            Self::OPTIONAL_DELIMITER
         }
     }
 
@@ -178,7 +191,7 @@ impl<'data> Argument<'data> {
 }
 
 /// A set of arguments known to be of valid length for use in a TACACS+ packet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Arguments<'args>(&'args [Argument<'args>]);
 
 impl<'args> Arguments<'args> {

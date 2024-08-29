@@ -203,7 +203,7 @@ fn deserialize_full_reply_packet() {
     raw_packet.extend_from_slice(b"fifteen letters"); // data
 
     let expected_header = HeaderInfo::new(
-        Version(MajorVersion::RFC8907, MinorVersion::V1),
+        Version::new(MajorVersion::RFC8907, MinorVersion::V1),
         2,
         PacketFlags::all(),
         session_id,
@@ -259,7 +259,7 @@ fn serialize_request_packet_obfuscated() {
     let session_id = 234897234;
     let header = HeaderInfo::new(Default::default(), 1, PacketFlags::all(), session_id);
 
-    let packet = Packet::new(header.clone(), body);
+    let packet = Packet::new(header, body);
 
     let key = b"supersecurekey";
     let mut buffer = [0xff; 70];

@@ -1,3 +1,4 @@
+use core::fmt;
 use getset::{CopyGetters, Getters};
 
 use crate::FieldText;
@@ -10,7 +11,7 @@ mod tests;
 
 /// The method used to authenticate to the TACACS+ client.
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum AuthenticationMethod {
     /// Unknown.
     NotSet = 0x00,
@@ -51,9 +52,31 @@ impl AuthenticationMethod {
     pub(super) const WIRE_SIZE: usize = 1;
 }
 
+impl fmt::Display for AuthenticationMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::NotSet => "not set",
+                Self::None => "none",
+                Self::Kerberos5 => "Kerberos 5",
+                Self::Line => "terminal line",
+                Self::Enable => "enable",
+                Self::Local => "local user database",
+                Self::TacacsPlus => "TACACS+",
+                Self::Guest => "guest authentication",
+                Self::Radius => "RADIUS",
+                Self::Kerberos4 => "Kerberos 4",
+                Self::RCommand => "r-command",
+            }
+        )
+    }
+}
+
 /// A privilege level for authentication. Limited to the range 0-15, inclusive.
 #[repr(transparent)]
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub struct PrivilegeLevel(u8);
 
 impl PrivilegeLevel {
@@ -85,6 +108,12 @@ impl Default for PrivilegeLevel {
     }
 }
 
+impl fmt::Display for PrivilegeLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Types of authentication supported by the TACACS+ protocol.
 ///
 /// RFC-8907 partitions these by supported minor version: [`Ascii`](AuthenticationType::Ascii) requires [`MinorVersion::Default`](crate::MinorVersion::Default), while the rest (beside [`NotSet`](AuthenticationType::NotSet), I believe) require [`MinorVersion::V1`](crate::MinorVersion::V1).
@@ -93,7 +122,7 @@ impl Default for PrivilegeLevel {
 ///
 /// [RFC-8907 Section 10.1]: https://datatracker.ietf.org/doc/html/rfc8907#section-10.1.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AuthenticationType {
     /// Authentication type not set, typically when it's not available to the client.
     ///
@@ -127,9 +156,26 @@ impl AuthenticationType {
     }
 }
 
+impl fmt::Display for AuthenticationType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::NotSet => "not set",
+                Self::Ascii => "ASCII",
+                Self::Pap => "PAP",
+                Self::Chap => "CHAP",
+                Self::MsChap => "MSCHAP",
+                Self::MsChapV2 => "MSCHAPv2",
+            }
+        )
+    }
+}
+
 /// A TACACS+ authentication service. Most of these values are only kept for backwards compatibility.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AuthenticationService {
     /// No authentication performed.
     None = 0x00,
@@ -161,8 +207,28 @@ pub enum AuthenticationService {
     FwProxy = 0x09,
 }
 
+impl fmt::Display for AuthenticationService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::None => "none",
+                Self::Login => "login",
+                Self::Enable => "enable",
+                Self::Ppp => "PPP",
+                Self::Pt => "PT",
+                Self::RCommand => "r-command",
+                Self::X25 => "X25",
+                Self::Nasi => "NASI",
+                Self::FwProxy => "firewall proxy",
+            }
+        )
+    }
+}
+
 /// Some authentication information about a request, sent or received from a server.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct AuthenticationContext {
     /// The privilege level of the request.
     pub privilege_level: PrivilegeLevel,
@@ -187,7 +253,7 @@ impl AuthenticationContext {
 }
 
 /// Some information about the user connected to a TACACS+ client.
-#[derive(Debug, PartialEq, Eq, Getters, CopyGetters)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Getters, CopyGetters)]
 pub struct UserInformation<'info> {
     /// The user performing the action that is connected to the client.
     #[getset(get_copy = "pub")]

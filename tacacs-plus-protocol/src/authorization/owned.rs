@@ -1,5 +1,4 @@
-use std::borrow::ToOwned;
-use std::string::String;
+use std::string::{String, ToString};
 use std::vec::Vec;
 
 use super::{Reply, Status};
@@ -8,6 +7,7 @@ use crate::sealed::Sealed;
 use crate::Argument;
 
 /// An authorization reply packet with owned fields.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ReplyOwned {
     /// The status returned by the TACACS+ server.
     pub status: Status,
@@ -35,8 +35,8 @@ impl FromBorrowedBody for ReplyOwned {
 
         ReplyOwned {
             status: borrowed.status,
-            server_message: borrowed.server_message.as_ref().to_owned(),
-            data: borrowed.data.as_ref().to_owned(),
+            server_message: borrowed.server_message.to_string(),
+            data: borrowed.data.to_string(),
             arguments: arguments_vec,
         }
     }
