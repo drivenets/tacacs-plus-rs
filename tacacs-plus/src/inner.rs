@@ -4,13 +4,18 @@ use std::fmt;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
+use std::task::Poll;
 
 use byteorder::{ByteOrder, NetworkEndian};
+use futures::poll;
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tacacs_plus_protocol::{Deserialize, PacketBody, Serialize};
 use tacacs_plus_protocol::{HeaderInfo, Packet, PacketFlags};
 
 use super::ClientError;
+
+#[cfg(test)]
+mod tests;
 
 /// A (pinned, boxed) future that returns a client connection or an error, as returned from a [`ConnectionFactory`].
 ///
@@ -119,8 +124,25 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientInner<S> {
         Ok(conn)
     }
 
-    /// Writes a packet to the underlying connection.
+    /// Writes a packet to the underlying connection, reconnecting if necessary.
     pub(super) async fn send_packet<B: PacketBody + Serialize>(
+        &mut self,
+        packet: Packet<B>,
+        secret_key: Option<&[u8]>,
+    ) -> Result<(), ClientError> {
+        // check if other end closed our connection, and reopen it accordingly
+        let connection = self.connection().await?;
+        if !is_connection_open(connection).await? {
+            self.post_session_cleanup(true).await?;
+        }
+
+        // send the packet after ensuring the connection is valid (or dropping
+        // it if it's invalid)
+        self._send_packet(packet, secret_key).await
+    }
+
+    /// Writes a packet to the underlying connection.
+    async fn _send_packet<B: PacketBody + Serialize>(
         &mut self,
         packet: Packet<B>,
         secret_key: Option<&[u8]>,
@@ -195,7 +217,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientInner<S> {
     pub(super) async fn post_session_cleanup(&mut self, status_is_error: bool) -> io::Result<()> {
         // close session if server doesn't agree to SINGLE_CONNECTION negotiation, or if an error occurred (since a mutex guarantees only one session is going at a time)
         if !self.single_connection_established || status_is_error {
-            // SAFETY: ensure_connection should be called before this function, and guarantees inner.connection is non-None
+            // SAFETY: connection() should be called before this function, and guarantees inner.connection is non-None
             let mut connection = self.connection.take().unwrap();
             connection.close().await?;
 
@@ -210,5 +232,50 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ClientInner<S> {
         }
 
         Ok(())
+    }
+}
+
+/// Checks if the provided connection is still open on both sides.
+///
+/// This is accomplished by attempting to read a single byte from the connection
+/// and checking for an EOF condition or specific errors (broken pipe/connection reset).
+///
+/// This might be overkill, but during testing I encountered a case where a write succeeded
+/// and a subsequent read hung due to the connection being closed on the other side, so
+/// avoiding that is preferable.
+async fn is_connection_open<C>(connection: &mut C) -> io::Result<bool>
+where
+    C: AsyncRead + Unpin,
+{
+    // read into a 1-byte buffer, since a 0-byte buffer might return 0 besides just on EOF
+    let mut buffer = [0];
+
+    // poll the read future exactly once to see if anything is ready immediately
+    match poll!(connection.read(&mut buffer)) {
+        // something ready on first poll likely indicates something wrong, since we aren't
+        // expecting any data to actually be ready
+        Poll::Ready(ready) => match ready {
+            // read of length 0 indicates an EOF, which happens when the other side closes a TCP connection
+            Ok(0) => Ok(false),
+
+            Err(e) => match e.kind() {
+                // these errors indicate that the connection is closed, which is the exact
+                // situation we're trying to recover from
+                //
+                // BrokenPipe seems to be Linux-specific (?), ConnectionReset is more general though
+                // (checked TCP & read(2) man pages for MacOS/FreeBSD/Linux)
+                io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset => Ok(false),
+
+                // bubble up any other errors to the caller
+                _ => Err(e),
+            },
+
+            // if there's data still available, the connection is still open, although
+            // this shouldn't happen in the context of TACACS+
+            Ok(1..) => Ok(true),
+        },
+
+        // nothing ready to read -> connection is still open
+        Poll::Pending => Ok(true),
     }
 }
