@@ -186,11 +186,7 @@ impl<'string> TryFrom<&'string str> for FieldText<'string> {
     type Error = InvalidText<&'string str>;
 
     fn try_from(value: &'string str) -> Result<Self, Self::Error> {
-        if is_printable_ascii(value) {
-            Ok(Self(FieldTextInner::Borrowed(value)))
-        } else {
-            Err(InvalidText(value))
-        }
+        Ok(Self(FieldTextInner::Borrowed(value)))
     }
 }
 
@@ -223,11 +219,7 @@ impl TryFrom<std::string::String> for FieldText<'_> {
     type Error = InvalidText<std::string::String>;
 
     fn try_from(value: std::string::String) -> Result<Self, Self::Error> {
-        if is_printable_ascii(&value) {
-            Ok(Self(FieldTextInner::Owned(value)))
-        } else {
-            Err(InvalidText(value))
-        }
+        Ok(Self(FieldTextInner::Owned(value)))
     }
 }
 
